@@ -6,8 +6,12 @@ on:
 jobs:
   migrate:
     runs-on: ubuntu-latest
+    permissions:
+      projects: write  # Required for copy/item-add/link
+      issues: read     # For listing issues/PRs
+      pull-requests: read
     env:
-      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}
+      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}  # Fine-grained PAT: projects:full, repo:full, org:write
 
     steps:
       - name: Show gh version
@@ -36,8 +40,7 @@ jobs:
       - name: Add all Issue/PR items from old project into new org project
         run: |
           set -euo pipefail
-
-          NEW_NUM='${{ steps.copy.outputs.new_num }}'
+          NEW_NUM="${{ steps.copy.outputs.new_num }}"  # Double quotes! GitHub interpolates here
 
           gh project item-list 4 --owner LevShlyogin -L 2000 --format json \
             | jq -r '.items[]
@@ -46,7 +49,6 @@ jobs:
             | while IFS= read -r url; do
                 [ -z "$url" ] && continue
                 echo "Adding $url"
-                # если вдруг уже добавлено или нет доступа — не валим весь job:
                 gh project item-add "$NEW_NUM" --owner SKB-CADDep --url "$url" || true
               done
 
@@ -54,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           SRC=$(gh project item-list 4 --owner LevShlyogin -L 2000 --format json | jq '.items | length')
-          DST=$(gh project item-list '${{ steps.copy.outputs.new_num }}' --owner SKB-CADDep -L 2000 --format json | jq '.items | length')
+          DST=$(gh project item-list "${{ steps.copy.outputs.new_num }}" --owner SKB-CADDep -L 2000 --format json | jq '.items | length')
           echo "Source items: $SRC"
+          echo "Dest items:   $DST"
           echo "Dest items:   $DST"
