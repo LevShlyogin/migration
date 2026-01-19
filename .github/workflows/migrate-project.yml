@@ -1,33 +1,69 @@
-name: Migrate GitHub Project to Org
+name: Migrate GitHub Project to Org (Full)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Ручной запуск
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
+    permissions:
+      projects: write  # Для gh project
+      contents: write  # Repo
+      issues: read     # Items
+      pull-requests: read
     env:
-      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}
+      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}  # Fine-grained PAT: projects:full, repo:full, org:write
     steps:
-      - name: Show gh version
-        run: gh --version
+      - name: Checkout repo (for logs)
+        uses: actions/checkout@v4
 
-      - name: Copy project user -> org
+      - name: Verify auth & scopes
+        run: |
+          gh auth status
+          echo "User: $(gh api user --jq .login)"
+          echo "Org access: $(gh api orgs/SKB-CADDep --jq .name || echo 'No access')"
+
+      - name: 1. Copy project structure (user -> org)
         id: copy
         run: |
-          NEW_NUM=$(gh project copy 4 \
-            --source-owner LevShlyogin \
-            --target-owner SKB-CADDep \
-            --title "Project #4 (org copy)" \
+          SRC_NUM=4
+          SRC_OWNER=LevShlyogin
+          DST_OWNER=SKB-CADDep
+          NEW_TITLE="Движуха группы разработки ПО (org copy)"
+          
+          NEW_NUM=$(gh project copy $SRC_NUM \
+            --source-owner $SRC_OWNER \
+            --target-owner $DST_OWNER \
+            --title "$NEW_TITLE" \
             --drafts \
             --format json \
             --jq '.number')
           echo "new_num=$NEW_NUM" >> "$GITHUB_OUTPUT"
-          echo "New org project number: $NEW_NUM"
+          echo "✅ Structure copied: https://github.com/orgs/$DST_OWNER/projects/$NEW_NUM"
 
-      - name: Compare item counts (sanity check)
+      - name: 2. Bulk add ALL items from source (fix empty!)
         run: |
-          SRC_COUNT=$(gh project item-list 4 --owner LevShlyogin -L 2000 --format json --jq 'length')
-          DST_COUNT=$(gh project item-list ${{ steps.copy.outputs.new_num }} --owner SKB-CADDep -L 2000 --format json --jq 'length')
-          echo "Source items: $SRC_COUNT"
-          echo "Dest items:   $DST_COUNT"
+          SRC_NUM=4
+          NEW_NUM=${{ steps.copy.outputs.new_num }}
+          SRC_OWNER=LevShlyogin
+          DST_OWNER=SKB-CADDep
+          
+          echo "📥 Fetching source item URLs (max 1000)..."
+          gh project item-list $SRC_NUM --owner $SRC_OWNER -L 1000 --format json \
+            --jq '.[].content.url? // empty' \
+            | grep -v '^$' \
+            | while read -r url; do
+                echo "➕ Adding: $url"
+                gh project item-add $NEW_NUM --owner $DST_OWNER --url "$url" || echo "⚠️ Skipped (dup/error): $url"
+                sleep 0.5  # Rate limit safety
+              done
+          echo "✅ Bulk items added!"
+
+      - name: 3. Sanity check counts
+        run: |
+          SRC_NUM=4
+          NEW_NUM=${{ steps.copy.outputs.new_num }}
+          SRC_COUNT=$(gh project item-list $SRC_NUM --owner LevShlyogin -L 2000 --format json --jq 'length')
+          DST_COUNT=$(gh project item-list $NEW_NUM --owner SKB-CADDep -L 2000 --format json --jq 'length')
+          echo "📊 Source items: $SRC_COUNT"
+          echo "📊 Dest items:   $DST_COUNT"
