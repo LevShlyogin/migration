@@ -1,23 +1,19 @@
 name: Migrate GitHub Project to Org (copy + items)
 
-on:
+'on':
   workflow_dispatch:
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    permissions:
-      projects: write  # Required for copy/item-add/link
-      issues: read     # For listing issues/PRs
-      pull-requests: read
     env:
-      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}  # Fine-grained PAT: projects:full, repo:full, org:write
+      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}
 
     steps:
       - name: Show gh version
         run: gh --version
 
-      - name: Sanity check: show source items count
+      - name: "Sanity check: show source items count"
         run: |
           set -euo pipefail
           gh project item-list 4 --owner LevShlyogin -L 2000 --format json \
@@ -40,7 +36,7 @@ jobs:
       - name: Add all Issue/PR items from old project into new org project
         run: |
           set -euo pipefail
-          NEW_NUM="${{ steps.copy.outputs.new_num }}"  # Double quotes! GitHub interpolates here
+          NEW_NUM="${{ steps.copy.outputs.new_num }}"
 
           gh project item-list 4 --owner LevShlyogin -L 2000 --format json \
             | jq -r '.items[]
@@ -58,5 +54,4 @@ jobs:
           SRC=$(gh project item-list 4 --owner LevShlyogin -L 2000 --format json | jq '.items | length')
           DST=$(gh project item-list "${{ steps.copy.outputs.new_num }}" --owner SKB-CADDep -L 2000 --format json | jq '.items | length')
           echo "Source items: $SRC"
-          echo "Dest items:   $DST"
           echo "Dest items:   $DST"
