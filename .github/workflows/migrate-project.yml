@@ -1,69 +1,59 @@
-name: Migrate GitHub Project to Org (Full)
+name: Migrate GitHub Project to Org (copy + items)
 
 on:
-  workflow_dispatch:  # Ручной запуск
+  workflow_dispatch:
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    permissions:
-      projects: write  # Для gh project
-      contents: write  # Repo
-      issues: read     # Items
-      pull-requests: read
     env:
-      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}  # Fine-grained PAT: projects:full, repo:full, org:write
+      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}
+
     steps:
-      - name: Checkout repo (for logs)
-        uses: actions/checkout@v4
+      - name: Show gh version
+        run: gh --version
 
-      - name: Verify auth & scopes
+      - name: Sanity check: show source items count
         run: |
-          gh auth status
-          echo "User: $(gh api user --jq .login)"
-          echo "Org access: $(gh api orgs/SKB-CADDep --jq .name || echo 'No access')"
+          set -euo pipefail
+          gh project item-list 4 --owner LevShlyogin -L 2000 --format json \
+            | jq '.items | length'
 
-      - name: 1. Copy project structure (user -> org)
+      - name: Copy project user -> org (structure + drafts)
         id: copy
         run: |
-          SRC_NUM=4
-          SRC_OWNER=LevShlyogin
-          DST_OWNER=SKB-CADDep
-          NEW_TITLE="Движуха группы разработки ПО (org copy)"
-          
-          NEW_NUM=$(gh project copy $SRC_NUM \
-            --source-owner $SRC_OWNER \
-            --target-owner $DST_OWNER \
-            --title "$NEW_TITLE" \
+          set -euo pipefail
+          NEW_NUM=$(gh project copy 4 \
+            --source-owner LevShlyogin \
+            --target-owner SKB-CADDep \
+            --title "Project #4 (org copy)" \
             --drafts \
             --format json \
             --jq '.number')
           echo "new_num=$NEW_NUM" >> "$GITHUB_OUTPUT"
-          echo "✅ Structure copied: https://github.com/orgs/$DST_OWNER/projects/$NEW_NUM"
+          echo "New org project number: $NEW_NUM"
 
-      - name: 2. Bulk add ALL items from source (fix empty!)
+      - name: Add all Issue/PR items from old project into new org project
         run: |
-          SRC_NUM=4
-          NEW_NUM=${{ steps.copy.outputs.new_num }}
-          SRC_OWNER=LevShlyogin
-          DST_OWNER=SKB-CADDep
-          
-          echo "📥 Fetching source item URLs (max 1000)..."
-          gh project item-list $SRC_NUM --owner $SRC_OWNER -L 1000 --format json \
-            --jq '.[].content.url? // empty' \
-            | grep -v '^$' \
-            | while read -r url; do
-                echo "➕ Adding: $url"
-                gh project item-add $NEW_NUM --owner $DST_OWNER --url "$url" || echo "⚠️ Skipped (dup/error): $url"
-                sleep 0.5  # Rate limit safety
+          set -euo pipefail
+
+          NEW_NUM='${{ steps.copy.outputs.new_num }}'
+
+          gh project item-list 4 --owner LevShlyogin -L 2000 --format json \
+            | jq -r '.items[]
+              | select(.content.type == "Issue" or .content.type == "PullRequest")
+              | .content.url' \
+            | while IFS= read -r url; do
+                [ -z "$url" ] && continue
+                echo "Adding $url"
+                # если вдруг уже добавлено или нет доступа — не валим весь job:
+                gh project item-add "$NEW_NUM" --owner SKB-CADDep --url "$url" || true
               done
-          echo "✅ Bulk items added!"
 
-      - name: 3. Sanity check counts
+      - name: Compare item counts (after)
         run: |
-          SRC_NUM=4
-          NEW_NUM=${{ steps.copy.outputs.new_num }}
-          SRC_COUNT=$(gh project item-list $SRC_NUM --owner LevShlyogin -L 2000 --format json --jq 'length')
-          DST_COUNT=$(gh project item-list $NEW_NUM --owner SKB-CADDep -L 2000 --format json --jq 'length')
-          echo "📊 Source items: $SRC_COUNT"
-          echo "📊 Dest items:   $DST_COUNT"
+          set -euo pipefail
+          SRC=$(gh project item-list 4 --owner LevShlyogin -L 2000 --format json | jq '.items | length')
+          DST=$(gh project item-list '${{ steps.copy.outputs.new_num }}' --owner SKB-CADDep -L 2000 --format json | jq '.items | length')
+          echo "Source items: $SRC"
+          echo "Dest items:   $DST"
