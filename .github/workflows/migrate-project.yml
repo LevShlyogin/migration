@@ -1,0 +1,33 @@
+name: Migrate GitHub Project to Org
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.MIGRATION_PAT }}
+    steps:
+      - name: Show gh version
+        run: gh --version
+
+      - name: Copy project user -> org
+        id: copy
+        run: |
+          NEW_NUM=$(gh project copy 4 \
+            --source-owner LevShlyogin \
+            --target-owner SKB-CADDep \
+            --title "Project #4 (org copy)" \
+            --drafts \
+            --format json \
+            --jq '.number')
+          echo "new_num=$NEW_NUM" >> "$GITHUB_OUTPUT"
+          echo "New org project number: $NEW_NUM"
+
+      - name: Compare item counts (sanity check)
+        run: |
+          SRC_COUNT=$(gh project item-list 4 --owner LevShlyogin -L 2000 --format json --jq 'length')
+          DST_COUNT=$(gh project item-list ${{ steps.copy.outputs.new_num }} --owner SKB-CADDep -L 2000 --format json --jq 'length')
+          echo "Source items: $SRC_COUNT"
+          echo "Dest items:   $DST_COUNT"
